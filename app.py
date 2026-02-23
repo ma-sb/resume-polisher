@@ -56,9 +56,6 @@ with st.sidebar:
     )
     active_model = st.selectbox("Model", provider["models"], index=0, key="model")
 
-    st.divider()
-    company_name = st.text_input("Company name (for PDF filename)", value="Company", key="company")
-
     if not saved_key:
         st.divider()
         st.markdown("**Save your API key**")
@@ -292,7 +289,7 @@ if "optimized" in st.session_state:
     if fit_summary:
         st.success(f"**Job fit:** {fit_summary}")
 
-    with st.expander("Review optimized resume", expanded=True):
+    with st.expander("Preview optimized resume", expanded=True):
         st.markdown(f"### {opt.get('name', '')}")
         for sec in opt.get("sections", []):
             st.markdown(f"**{sec.get('heading', '')}**")
@@ -301,26 +298,36 @@ if "optimized" in st.session_state:
             for b in sec.get("bullets", []):
                 st.markdown(f"- {b}")
 
-    # ── Approve & Export ─────────────────────────────────────────────────────
+# ── Export ───────────────────────────────────────────────────────────────────
 
-    st.subheader("6 — Approve & Export")
+st.subheader("6 — Export")
 
+if "optimized" in st.session_state:
+    opt_export = st.session_state["optimized"]
     source_resume: Resume | None = st.session_state.get("optimized_source_resume")
     has_original = source_resume and source_resume.raw_bytes
+
+    company_name = st.text_input(
+        "Company name (used in the exported filename)",
+        value="",
+        placeholder="e.g. Google, McKinsey, Tesla…",
+        key="company_name_export",
+    )
 
     if not has_original:
         st.warning("Original .docx bytes not available — export will use a basic format.")
 
-    approve_btn = st.button(
-        "Approve & Export",
+    export_btn = st.button(
+        "Export",
+        disabled=not (has_original and company_name.strip()),
         use_container_width=True,
         type="primary",
     )
 
-    if approve_btn and has_original:
+    if export_btn and has_original:
         with st.spinner("Generating files (preserving original formatting)…"):
             try:
-                docx_path, pdf_path = export(source_resume.raw_bytes, opt, OUTPUT_DIR, company_name)
+                docx_path, pdf_path = export(source_resume.raw_bytes, opt_export, OUTPUT_DIR, company_name.strip())
                 st.session_state["export_docx_path"] = docx_path
                 st.session_state["export_pdf_path"] = pdf_path
                 st.session_state["export_approved"] = True
@@ -355,3 +362,5 @@ if "optimized" in st.session_state:
                         )
                 else:
                     st.caption("PDF conversion requires LibreOffice. Download the .docx and convert manually, or install LibreOffice.")
+else:
+    st.info("Generate an optimized resume in step 5 first.")
