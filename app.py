@@ -220,19 +220,40 @@ if "improvements" in st.session_state:
     if imp.get("overall_tips"):
         st.info(f"**Tips:** {imp['overall_tips']}")
 
-    for item in imp.get("improvements", []):
+    sel_all_col1, sel_all_col2 = st.columns([4, 1])
+    with sel_all_col2:
+        select_all = st.checkbox("Select all", value=True, key="select_all_rewrites")
+
+    approved_rewrites: list[dict] = []
+    for idx, item in enumerate(imp.get("improvements", [])):
         section = item.get("section", "Unknown section")
         original = item.get("original", "(not provided)")
         rewritten = item.get("rewritten") or item.get("suggested") or item.get("improved") or "(not provided)"
         reason = item.get("reason", "")
 
-        with st.expander(f"📝 {section} — rewrite suggestion"):
-            st.markdown("**Original:**")
-            st.markdown(f"> {original}")
-            st.markdown("**Suggested rewrite:**")
-            st.markdown(f"> {rewritten}")
-            if reason:
-                st.caption(reason)
+        col_left, col_right = st.columns([4, 1])
+        with col_left:
+            with st.expander(f"📝 {section} — rewrite suggestion"):
+                st.markdown("**Original:**")
+                st.markdown(f"> {original}")
+                st.markdown("**Suggested rewrite:**")
+                st.markdown(f"> {rewritten}")
+                if reason:
+                    st.caption(reason)
+        with col_right:
+            checked = st.checkbox("Apply", value=select_all, key=f"rewrite_{idx}")
+
+        if checked:
+            approved_rewrites.append({
+                "section": section,
+                "original": original,
+                "rewritten": rewritten,
+            })
+
+    st.session_state["approved_rewrites"] = approved_rewrites
+    count = len(approved_rewrites)
+    total = len(imp.get("improvements", []))
+    st.caption(f"{count} of {total} rewrites selected for optimization.")
 
     if imp.get("bullets_to_remove"):
         st.markdown("---")
@@ -254,7 +275,8 @@ optimize_btn = st.button(
 if optimize_btn and selected_resume:
     with st.spinner("Optimizing resume…"):
         try:
-            optimized = optimize_resume(job_desc, selected_resume, api_key, active_model, base_url, json_mode)
+            approved = st.session_state.get("approved_rewrites", [])
+            optimized = optimize_resume(job_desc, selected_resume, api_key, active_model, base_url, json_mode, approved)
             st.session_state["optimized"] = optimized
             st.session_state["optimized_source_resume"] = selected_resume
             st.session_state.pop("export_docx_path", None)

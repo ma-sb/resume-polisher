@@ -243,11 +243,24 @@ def optimize_resume(
     model: str = "gpt-4o-mini",
     base_url: str = "",
     json_mode: bool = True,
+    approved_rewrites: list[dict] | None = None,
 ) -> dict:
     """Produce a fully optimized resume tailored to the job."""
     client = _make_client(api_key, base_url)
+    user_parts = [
+        f"JOB DESCRIPTION:\n{job_description}",
+        f"RESUME:\n{_build_resume_text(resume)}",
+    ]
+    if approved_rewrites:
+        lines = ["APPROVED REWRITES (apply these exact changes; for bullets not listed, optimize as you see fit):"]
+        for rw in approved_rewrites:
+            lines.append(f"  Section: {rw['section']}")
+            lines.append(f"  Original: {rw['original']}")
+            lines.append(f"  Rewrite to: {rw['rewritten']}")
+            lines.append("")
+        user_parts.append("\n".join(lines))
     return _call(
         client, model, _OPTIMIZE_SYSTEM,
-        f"JOB DESCRIPTION:\n{job_description}\n\nRESUME:\n{_build_resume_text(resume)}",
+        "\n\n".join(user_parts),
         temperature=0.3, json_mode=json_mode,
     )
