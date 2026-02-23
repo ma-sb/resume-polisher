@@ -175,7 +175,7 @@ def _parse_json(text: str) -> dict:
     """Parse JSON from a response, stripping markdown fences and control chars."""
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
     cleaned = re.sub(r"\n?```\s*$", "", cleaned)
-    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", cleaned)
+    cleaned = re.sub(r"[\x00-\x09\x0b\x0c\x0e-\x1f]", " ", cleaned)
     return json.loads(cleaned)
 
 
