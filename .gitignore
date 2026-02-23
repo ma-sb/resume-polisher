@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+output/*.pdf
+resumes/**/*.docx
+resumes/**/*.pdf
+.DS_Store
