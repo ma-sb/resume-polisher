@@ -129,8 +129,11 @@ STRICT RULES:
 - NEVER make bullets longer than the original. Same length or shorter.
 - Preserve all metrics, numbers, dates, company names, and job titles exactly.
 - Keep the same section structure and section order.
+- Keep the EXACT same number of bullets per section as the original.
 - Wording changes only — adjust phrasing, terminology, and action verbs to
   mirror the job description while keeping the meaning truthful.
+- Lines that are company names, job titles, dates, or university names
+  should be returned AS-IS without modification.
 
 You MUST use exactly these key names in your JSON. Do not rename them.
 
@@ -141,7 +144,7 @@ Return ONLY valid JSON (no markdown fences):
   "sections": [
     {
       "heading": "<section heading>",
-      "content": "<paragraph text if any, empty string if none>",
+      "content": "",
       "bullets": ["<bullet 1>", "<bullet 2>"]
     }
   ]
@@ -152,8 +155,6 @@ def _build_resume_text(resume: Resume) -> str:
     parts = [f"FILENAME: {resume.filename}", f"CANDIDATE: {resume.name}", ""]
     for sec in resume.sections:
         parts.append(f"## {sec.heading}")
-        if sec.text:
-            parts.append(sec.text)
         for b in sec.bullets:
             parts.append(f"  • {b}")
         parts.append("")

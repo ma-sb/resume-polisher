@@ -5,7 +5,7 @@ from pathlib import Path
 
 from core.reader import load_resumes, read_docx_from_bytes, Resume
 from core.matcher import PROVIDERS, match_resumes, get_improvements, optimize_resume
-from core.exporter import export_pdf
+from core.exporter import export
 
 RESUMES_DIR = Path(__file__).parent / "resumes"
 OUTPUT_DIR = Path(__file__).parent / "output"
@@ -54,7 +54,7 @@ with st.sidebar:
         "3. Click **Match & Score**\n"
         "4. Get improvement suggestions\n"
         "5. Generate optimized resume & review\n"
-        "6. Approve → export PDF"
+        "6. Approve → export"
     )
 
 base_url = provider["base_url"]
@@ -232,7 +232,9 @@ if optimize_btn and selected_resume:
         try:
             optimized = optimize_resume(job_desc, selected_resume, api_key, active_model, base_url, json_mode)
             st.session_state["optimized"] = optimized
-            st.session_state.pop("pdf_path", None)
+            st.session_state["optimized_source_resume"] = selected_resume
+            st.session_state.pop("export_docx_path", None)
+            st.session_state.pop("export_pdf_path", None)
             st.session_state["export_approved"] = False
         except Exception as e:
             st.error(f"Error: {e}")
@@ -255,32 +257,55 @@ if "optimized" in st.session_state:
 
     # ── Approve & Export ─────────────────────────────────────────────────────
 
-    st.subheader("6 — Approve & Export PDF")
+    st.subheader("6 — Approve & Export")
+
+    source_resume: Resume | None = st.session_state.get("optimized_source_resume")
+    has_original = source_resume and source_resume.raw_bytes
+
+    if not has_original:
+        st.warning("Original .docx bytes not available — export will use a basic format.")
 
     approve_btn = st.button(
-        "Approve & Export as PDF",
+        "Approve & Export",
         use_container_width=True,
         type="primary",
     )
 
-    if approve_btn:
-        with st.spinner("Generating PDF…"):
+    if approve_btn and has_original:
+        with st.spinner("Generating files (preserving original formatting)…"):
             try:
-                pdf_path = export_pdf(opt, OUTPUT_DIR, company_name)
-                st.session_state["pdf_path"] = pdf_path
+                docx_path, pdf_path = export(source_resume.raw_bytes, opt, OUTPUT_DIR, company_name)
+                st.session_state["export_docx_path"] = docx_path
+                st.session_state["export_pdf_path"] = pdf_path
                 st.session_state["export_approved"] = True
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    if st.session_state.get("export_approved") and "pdf_path" in st.session_state:
-        pdf_path: Path = st.session_state["pdf_path"]
-        if pdf_path.exists():
-            st.success(f"PDF exported: `{pdf_path.name}`")
-            with open(pdf_path, "rb") as f:
-                st.download_button(
-                    label=f"Download {pdf_path.name}",
-                    data=f.read(),
-                    file_name=pdf_path.name,
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
+    if st.session_state.get("export_approved"):
+        docx_path: Path | None = st.session_state.get("export_docx_path")
+        pdf_path: Path | None = st.session_state.get("export_pdf_path")
+
+        if docx_path and docx_path.exists():
+            st.success(f"Exported: `{docx_path.name}`")
+            col_dl1, col_dl2 = st.columns(2)
+            with col_dl1:
+                with open(docx_path, "rb") as f:
+                    st.download_button(
+                        label=f"Download .docx",
+                        data=f.read(),
+                        file_name=docx_path.name,
+                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        use_container_width=True,
+                    )
+            with col_dl2:
+                if pdf_path and pdf_path.exists():
+                    with open(pdf_path, "rb") as f:
+                        st.download_button(
+                            label=f"Download .pdf",
+                            data=f.read(),
+                            file_name=pdf_path.name,
+                            mime="application/pdf",
+                            use_container_width=True,
+                        )
+                else:
+                    st.caption("PDF conversion requires LibreOffice. Download the .docx and convert manually, or install LibreOffice.")

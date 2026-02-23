@@ -1,127 +1,141 @@
-"""Export an optimized resume to a formatted PDF."""
+"""Export an optimized resume by cloning the original .docx and converting to PDF."""
 
+import io
+import subprocess
+import shutil
+import tempfile
 from pathlib import Path
 
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
-from reportlab.lib.colors import HexColor
+from docx import Document
 
 
-def _build_styles():
-    ss = getSampleStyleSheet()
-    ss.add(ParagraphStyle(
-        "ResumeName",
-        parent=ss["Title"],
-        fontSize=18,
-        leading=22,
-        alignment=TA_CENTER,
-        spaceAfter=4,
-        textColor=HexColor("#1a1a2e"),
-    ))
-    ss.add(ParagraphStyle(
-        "SectionHeading",
-        parent=ss["Heading2"],
-        fontSize=12,
-        leading=15,
-        spaceBefore=10,
-        spaceAfter=4,
-        textColor=HexColor("#16213e"),
-        borderWidth=0,
-    ))
-    ss.add(ParagraphStyle(
-        "BulletItem",
-        parent=ss["BodyText"],
-        fontSize=10,
-        leading=13,
-        leftIndent=18,
-        bulletIndent=6,
-        spaceBefore=2,
-        spaceAfter=2,
-        textColor=HexColor("#2c2c2c"),
-    ))
-    ss.add(ParagraphStyle(
-        "SectionText",
-        parent=ss["BodyText"],
-        fontSize=10,
-        leading=13,
-        spaceBefore=2,
-        spaceAfter=2,
-        textColor=HexColor("#2c2c2c"),
-    ))
-    return ss
+def _replace_paragraph_text(para, new_text: str):
+    """Replace a paragraph's visible text while preserving the first run's formatting."""
+    if not para.runs:
+        para.text = new_text
+        return
+    para.runs[0].text = new_text
+    for run in para.runs[1:]:
+        run.text = ""
 
 
-def export_pdf(
+def _is_major_heading(para) -> bool:
+    """Same heading detection as the reader."""
+    text = para.text.strip()
+    if not text or len(text) > 80:
+        return False
+    if para.style.name.startswith("Heading"):
+        return True
+    if not para.runs:
+        return False
+    return all(r.bold for r in para.runs if r.text.strip())
+
+
+def _normalize(text: str) -> str:
+    return " ".join(text.lower().split())
+
+
+def _build_section_map(optimized: dict) -> dict[str, list[str]]:
+    """Map normalized section headings to a flat list of their content items."""
+    section_map: dict[str, list[str]] = {}
+    for sec in optimized.get("sections", []):
+        heading = sec.get("heading", "")
+        key = _normalize(heading)
+        items: list[str] = []
+        content = sec.get("content", "")
+        if content:
+            items.append(content)
+        items.extend(sec.get("bullets", []))
+        section_map[key] = items
+    return section_map
+
+
+def export_docx(
+    original_bytes: bytes,
     optimized: dict,
     output_dir: str | Path,
     company_name: str = "Company",
 ) -> Path:
     """
-    Export optimized resume dict to PDF.
-
-    Args:
-        optimized: dict with "name" and "sections" keys (from optimizer)
-        output_dir: folder to save the PDF
-        company_name: used in the filename
-
-    Returns:
-        Path to the created PDF file.
+    Clone the original .docx, replace content paragraphs with optimized text
+    while preserving all formatting, and save.
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     name = optimized.get("name", "Candidate").strip()
     parts = name.split()
-    if len(parts) >= 2:
-        first, last = parts[0], parts[-1]
-    else:
-        first, last = name, ""
-
+    first, last = (parts[0], parts[-1]) if len(parts) >= 2 else (name, "")
     safe = lambda s: s.replace(" ", "_").replace("/", "_")
-    filename = f"{safe(first)}_{safe(last)}_Resume_{safe(company_name)}.pdf"
-    filepath = output_dir / filename
+    stem = f"{safe(first)}_{safe(last)}_Resume_{safe(company_name)}"
 
-    styles = _build_styles()
-    doc = SimpleDocTemplate(
-        str(filepath),
-        pagesize=letter,
-        leftMargin=0.75 * inch,
-        rightMargin=0.75 * inch,
-        topMargin=0.6 * inch,
-        bottomMargin=0.6 * inch,
-    )
+    doc = Document(io.BytesIO(original_bytes))
+    section_map = _build_section_map(optimized)
 
-    story: list = []
+    current_key: str | None = None
+    bullet_idx = 0
 
-    story.append(Paragraph(name, styles["ResumeName"]))
-    story.append(Spacer(1, 4))
-    story.append(HRFlowable(
-        width="100%", thickness=1, color=HexColor("#16213e"),
-        spaceBefore=2, spaceAfter=8,
-    ))
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if not text:
+            continue
 
-    for section in optimized.get("sections", []):
-        heading = section.get("heading", "")
-        content = section.get("content", "")
-        bullets = section.get("bullets", [])
+        if _is_major_heading(para):
+            norm = _normalize(text)
+            if norm in section_map:
+                current_key = norm
+                bullet_idx = 0
+            else:
+                current_key = None
+            continue
 
-        story.append(Paragraph(heading.upper(), styles["SectionHeading"]))
-        story.append(HRFlowable(
-            width="100%", thickness=0.5, color=HexColor("#cccccc"),
-            spaceBefore=0, spaceAfter=4,
-        ))
+        if current_key is not None:
+            items = section_map[current_key]
+            if bullet_idx < len(items):
+                _replace_paragraph_text(para, items[bullet_idx])
+                bullet_idx += 1
 
-        if content:
-            story.append(Paragraph(content, styles["SectionText"]))
+    docx_path = output_dir / f"{stem}.docx"
+    doc.save(str(docx_path))
+    return docx_path
 
-        for bullet in bullets:
-            story.append(Paragraph(
-                f"• {bullet}",
-                styles["BulletItem"],
-            ))
 
-    doc.build(story)
-    return filepath
+def _convert_to_pdf(docx_path: Path) -> Path | None:
+    """Try to convert a .docx to PDF using LibreOffice."""
+    lo_cmd = None
+    for candidate in ["libreoffice", "soffice", "/Applications/LibreOffice.app/Contents/MacOS/soffice"]:
+        if shutil.which(candidate):
+            lo_cmd = candidate
+            break
+
+    if not lo_cmd:
+        return None
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [lo_cmd, "--headless", "--convert-to", "pdf", "--outdir", tmpdir, str(docx_path)],
+            capture_output=True, timeout=60,
+        )
+        if result.returncode != 0:
+            return None
+        pdf_tmp = Path(tmpdir) / (docx_path.stem + ".pdf")
+        if not pdf_tmp.exists():
+            return None
+        pdf_dest = docx_path.with_suffix(".pdf")
+        shutil.move(str(pdf_tmp), str(pdf_dest))
+        return pdf_dest
+
+
+def export(
+    original_bytes: bytes,
+    optimized: dict,
+    output_dir: str | Path,
+    company_name: str = "Company",
+) -> tuple[Path, Path | None]:
+    """
+    Export optimized resume. Returns (docx_path, pdf_path_or_None).
+    The .docx always preserves original formatting. PDF requires LibreOffice.
+    """
+    docx_path = export_docx(original_bytes, optimized, output_dir, company_name)
+    pdf_path = _convert_to_pdf(docx_path)
+    return docx_path, pdf_path

@@ -10,7 +10,6 @@ from docx import Document
 class ResumeSection:
     heading: str
     bullets: list[str] = field(default_factory=list)
-    text: str = ""
 
 
 @dataclass
@@ -20,14 +19,27 @@ class Resume:
     full_text: str
     sections: list[ResumeSection] = field(default_factory=list)
     name: str = ""
+    raw_bytes: bytes | None = None
 
     @property
     def display_name(self) -> str:
         return self.name or self.filename
 
 
+def _is_major_heading(para) -> bool:
+    """Detect top-level section headings (EXPERIENCE, EDUCATION, etc.)."""
+    text = para.text.strip()
+    if not text or len(text) > 80:
+        return False
+    if para.style.name.startswith("Heading"):
+        return True
+    if not para.runs:
+        return False
+    return all(r.bold for r in para.runs if r.text.strip())
+
+
 def _parse_document(doc: Document, filename: str, filepath: Path | None = None) -> Resume:
-    """Shared logic to extract sections and bullets from a python-docx Document."""
+    """Parse a python-docx Document into a Resume with per-paragraph bullets."""
     full_lines: list[str] = []
     sections: list[ResumeSection] = []
     current_section: ResumeSection | None = None
@@ -43,20 +55,12 @@ def _parse_document(doc: Document, filename: str, filepath: Path | None = None) 
         if i == 0 and not candidate_name:
             candidate_name = text
 
-        is_heading = (
-            para.style.name.startswith("Heading")
-            or (para.runs and all(r.bold for r in para.runs if r.text.strip()))
-        )
-
-        if is_heading and len(text) < 80:
+        if _is_major_heading(para):
             current_section = ResumeSection(heading=text)
             sections.append(current_section)
         elif current_section is not None:
-            if para.style.name.startswith("List") or text.startswith(("•", "-", "–", "◦", "▪")):
-                bullet = text.lstrip("•-–◦▪ ")
-                current_section.bullets.append(bullet)
-            else:
-                current_section.text += (" " + text) if current_section.text else text
+            clean = text.lstrip("•-–◦▪ ")
+            current_section.bullets.append(clean)
 
     return Resume(
         filepath=filepath or Path(filename),
@@ -69,14 +73,20 @@ def _parse_document(doc: Document, filename: str, filepath: Path | None = None) 
 
 def read_docx(filepath: Path) -> Resume:
     """Parse a .docx file from disk."""
-    doc = Document(str(filepath))
-    return _parse_document(doc, filepath.name, filepath)
+    filepath = Path(filepath)
+    raw = filepath.read_bytes()
+    doc = Document(io.BytesIO(raw))
+    resume = _parse_document(doc, filepath.name, filepath)
+    resume.raw_bytes = raw
+    return resume
 
 
 def read_docx_from_bytes(data: bytes, filename: str) -> Resume:
     """Parse a .docx file from raw bytes (e.g. an uploaded file)."""
     doc = Document(io.BytesIO(data))
-    return _parse_document(doc, filename)
+    resume = _parse_document(doc, filename)
+    resume.raw_bytes = data
+    return resume
 
 
 def load_resumes(folder: Path) -> list[Resume]:
