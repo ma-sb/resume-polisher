@@ -1,7 +1,9 @@
 __pycache__/
 *.pyc
 .env
+.streamlit/secrets.toml
 output/*.pdf
+output/*.docx
 resumes/**/*.docx
 resumes/**/*.pdf
 .DS_Store
