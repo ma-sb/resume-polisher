@@ -1,5 +1,6 @@
 """Read and parse .docx resume files."""
 
+import io
 from pathlib import Path
 from dataclasses import dataclass, field
 from docx import Document
@@ -25,9 +26,8 @@ class Resume:
         return self.name or self.filename
 
 
-def read_docx(filepath: Path) -> Resume:
-    """Parse a .docx file into a Resume object with sections and bullet points."""
-    doc = Document(str(filepath))
+def _parse_document(doc: Document, filename: str, filepath: Path | None = None) -> Resume:
+    """Shared logic to extract sections and bullets from a python-docx Document."""
     full_lines: list[str] = []
     sections: list[ResumeSection] = []
     current_section: ResumeSection | None = None
@@ -59,16 +59,28 @@ def read_docx(filepath: Path) -> Resume:
                 current_section.text += (" " + text) if current_section.text else text
 
     return Resume(
-        filepath=filepath,
-        filename=filepath.name,
+        filepath=filepath or Path(filename),
+        filename=filename,
         full_text="\n".join(full_lines),
         sections=sections,
         name=candidate_name,
     )
 
 
+def read_docx(filepath: Path) -> Resume:
+    """Parse a .docx file from disk."""
+    doc = Document(str(filepath))
+    return _parse_document(doc, filepath.name, filepath)
+
+
+def read_docx_from_bytes(data: bytes, filename: str) -> Resume:
+    """Parse a .docx file from raw bytes (e.g. an uploaded file)."""
+    doc = Document(io.BytesIO(data))
+    return _parse_document(doc, filename)
+
+
 def load_resumes(folder: Path) -> list[Resume]:
-    """Load all .docx resumes from a folder."""
+    """Load all .docx resumes from a folder (recursively)."""
     folder = Path(folder)
     if not folder.exists():
         return []

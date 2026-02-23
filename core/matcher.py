@@ -132,6 +132,8 @@ STRICT RULES:
 - Wording changes only — adjust phrasing, terminology, and action verbs to
   mirror the job description while keeping the meaning truthful.
 
+You MUST use exactly these key names in your JSON. Do not rename them.
+
 Return ONLY valid JSON (no markdown fences):
 {
   "name": "<candidate name>",

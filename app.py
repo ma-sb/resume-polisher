@@ -3,7 +3,7 @@
 import streamlit as st
 from pathlib import Path
 
-from core.reader import load_resumes, Resume
+from core.reader import load_resumes, read_docx_from_bytes, Resume
 from core.matcher import PROVIDERS, match_resumes, get_improvements, optimize_resume
 from core.exporter import export_pdf
 
@@ -45,16 +45,11 @@ with st.sidebar:
     active_model = st.selectbox("Model", provider["models"], index=0)
 
     st.divider()
-    resumes_folder = st.text_input(
-        "Resumes folder",
-        value=str(RESUMES_DIR),
-        help="Absolute path to a folder containing .docx resumes.",
-    )
     company_name = st.text_input("Company name (for PDF filename)", value="Company")
     st.divider()
     st.markdown("**How to use**")
     st.markdown(
-        "1. Put your `.docx` resumes in the resumes folder\n"
+        "1. Upload your `.docx` resumes\n"
         "2. Paste the job description\n"
         "3. Click **Match & Score**\n"
         "4. Get improvement suggestions\n"
@@ -67,9 +62,6 @@ json_mode = provider["json_mode"]
 
 # ── Load resumes ─────────────────────────────────────────────────────────────
 
-resumes_path = Path(resumes_folder)
-resumes: list[Resume] = load_resumes(resumes_path)
-
 st.subheader("1 — Job Description")
 job_desc = st.text_area(
     "Paste the job description below",
@@ -78,22 +70,45 @@ job_desc = st.text_area(
 )
 
 st.subheader("2 — Your Resumes")
-if resumes:
-    st.success(f"Found **{len(resumes)}** resume(s) in `{resumes_path}`")
+
+uploaded_files = st.file_uploader(
+    "Upload .docx resumes",
+    type=["docx"],
+    accept_multiple_files=True,
+    help="Drag and drop one or more .docx resume files.",
+)
+
+all_resumes: list[Resume] = []
+
+if uploaded_files:
+    for uf in uploaded_files:
+        try:
+            resume = read_docx_from_bytes(uf.getvalue(), uf.name)
+            all_resumes.append(resume)
+        except Exception as e:
+            st.warning(f"Could not parse {uf.name}: {e}")
+
+folder_resumes = load_resumes(RESUMES_DIR)
+for r in folder_resumes:
+    if r.filename not in [ar.filename for ar in all_resumes]:
+        all_resumes.append(r)
+
+if all_resumes:
+    st.success(f"**{len(all_resumes)}** resume(s) loaded")
     selected_filenames = st.multiselect(
         "Select resumes to use",
-        options=[r.filename for r in resumes],
-        default=[r.filename for r in resumes],
+        options=[r.filename for r in all_resumes],
+        default=[r.filename for r in all_resumes],
         help="Only selected resumes will be sent to the API.",
     )
-    selected_resumes: list[Resume] = [r for r in resumes if r.filename in selected_filenames]
+    selected_resumes: list[Resume] = [r for r in all_resumes if r.filename in selected_filenames]
     with st.expander("Preview loaded resumes"):
         for r in selected_resumes:
             st.markdown(f"**{r.filename}** — *{r.name}*")
             st.text(r.full_text[:500] + ("…" if len(r.full_text) > 500 else ""))
             st.divider()
 else:
-    st.warning(f"No `.docx` files found in `{resumes_path}`. Add your resumes and reload.")
+    st.info("Upload your `.docx` resumes above to get started.")
     selected_resumes = []
 
 # ── Matching & Scoring ───────────────────────────────────────────────────────
