@@ -62,8 +62,8 @@ Group them into:
 
 STEP 2 — BULLET-POINT ANALYSIS
 For each bullet point in the resume, decide:
-  - Is it already well-aligned with the job? → skip it.
-  - Can it be reworded to incorporate extracted keywords? → rewrite it.
+  - Is it already well-aligned with the job? -> skip it.
+  - Can it be reworded to incorporate extracted keywords? -> rewrite it.
 
 REWRITE RULES (follow strictly):
   - Do NOT add information the candidate did not already describe.
@@ -74,7 +74,7 @@ REWRITE RULES (follow strictly):
   - Each rewrite must sound natural, not keyword-stuffed.
 
 STEP 3 — BULLET REMOVAL (only if needed)
-If — and only if — a new bullet point truly needs to be added to cover a critical
+If and only if a new bullet point truly needs to be added to cover a critical
 gap, you MUST remove the single least relevant existing bullet from the same
 section so the total bullet count stays identical. Otherwise leave bullets_to_remove
 as an empty list.
@@ -84,27 +84,27 @@ You MUST use exactly these key names in your JSON. Do not rename them.
 Return ONLY valid JSON (no markdown fences):
 {
   "keywords": {
-    "hard_skills": ["<keyword>"],
-    "soft_skills": ["<keyword>"],
-    "domain_terms": ["<keyword>"],
-    "action_verbs": ["<verb>"]
+    "hard_skills": ["keyword"],
+    "soft_skills": ["keyword"],
+    "domain_terms": ["keyword"],
+    "action_verbs": ["verb"]
   },
   "improvements": [
     {
-      "section": "<section heading>",
-      "original": "<original bullet text>",
-      "rewritten": "<improved bullet text>",
-      "reason": "<which keywords were woven in and why>"
+      "section": "section heading",
+      "original": "original bullet text",
+      "rewritten": "improved bullet text",
+      "reason": "which keywords were woven in and why"
     }
   ],
   "bullets_to_remove": [
     {
-      "section": "<section heading>",
-      "bullet": "<bullet text to remove>",
-      "reason": "<why this is the least relevant>"
+      "section": "section heading",
+      "bullet": "bullet text to remove",
+      "reason": "why this is the least relevant"
     }
   ],
-  "overall_tips": "<1-3 general tips for this resume vs. this job>"
+  "overall_tips": "1-3 general tips for this resume vs. this job"
 }"""
 
 _OPTIMIZE_SYSTEM = """You are an expert resume optimizer.
@@ -130,22 +130,23 @@ STRICT RULES:
 - Preserve all metrics, numbers, dates, company names, and job titles exactly.
 - Keep the same section structure and section order.
 - Keep the EXACT same number of bullets per section as the original.
-- Wording changes only — adjust phrasing, terminology, and action verbs to
+- Wording changes only: adjust phrasing, terminology, and action verbs to
   mirror the job description while keeping the meaning truthful.
 - Lines that are company names, job titles, dates, or university names
   should be returned AS-IS without modification.
+- Do NOT include tab characters or other control characters in your output.
 
 You MUST use exactly these key names in your JSON. Do not rename them.
 
 Return ONLY valid JSON (no markdown fences):
 {
-  "name": "<candidate name>",
-  "job_fit_summary": "<one sentence summarizing how well this optimized resume fits the job>",
+  "name": "candidate name",
+  "job_fit_summary": "one sentence summarizing how well this optimized resume fits the job",
   "sections": [
     {
-      "heading": "<section heading>",
+      "heading": "section heading",
       "content": "",
-      "bullets": ["<bullet 1>", "<bullet 2>"]
+      "bullets": ["bullet 1", "bullet 2"]
     }
   ]
 }"""
@@ -156,7 +157,7 @@ def _build_resume_text(resume: Resume) -> str:
     for sec in resume.sections:
         parts.append(f"## {sec.heading}")
         for b in sec.bullets:
-            parts.append(f"  • {b}")
+            parts.append(f"  - {b}")
         parts.append("")
     if not resume.sections:
         parts.append(resume.full_text)
@@ -171,9 +172,10 @@ def _make_client(api_key: str, base_url: str = "") -> OpenAI:
 
 
 def _parse_json(text: str) -> dict:
-    """Parse JSON from a response, stripping markdown fences if present."""
+    """Parse JSON from a response, stripping markdown fences and control chars."""
     cleaned = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
     cleaned = re.sub(r"\n?```\s*$", "", cleaned)
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", " ", cleaned)
     return json.loads(cleaned)
 
 
