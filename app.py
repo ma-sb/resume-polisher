@@ -217,9 +217,16 @@ if "improvements" in st.session_state:
     if imp.get("overall_tips"):
         st.info(f"**Tips:** {imp['overall_tips']}")
 
+    n_items = len(imp.get("improvements", []))
+
+    def _toggle_all():
+        val = st.session_state["select_all_rewrites"]
+        for i in range(n_items):
+            st.session_state[f"rewrite_{i}"] = val
+
     sel_all_col1, sel_all_col2 = st.columns([4, 1])
     with sel_all_col2:
-        select_all = st.checkbox("Select all", value=True, key="select_all_rewrites")
+        st.checkbox("Select all", value=True, key="select_all_rewrites", on_change=_toggle_all)
 
     approved_rewrites: list[dict] = []
     for idx, item in enumerate(imp.get("improvements", [])):
@@ -238,7 +245,7 @@ if "improvements" in st.session_state:
                 if reason:
                     st.caption(reason)
         with col_right:
-            checked = st.checkbox("Apply", value=select_all, key=f"rewrite_{idx}")
+            checked = st.checkbox("Apply", value=True, key=f"rewrite_{idx}")
 
         if checked:
             approved_rewrites.append({
