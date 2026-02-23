@@ -245,7 +245,7 @@ if "improvements" in st.session_state:
                 if reason:
                     st.caption(reason)
         with col_right:
-            checked = st.checkbox("Apply", value=True, key=f"rewrite_{idx}")
+            checked = st.checkbox("Accept suggestion", value=True, key=f"rewrite_{idx}")
 
         if checked:
             approved_rewrites.append({
