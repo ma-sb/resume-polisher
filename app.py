@@ -490,7 +490,7 @@ if "improvements" in st.session_state:
                 st.markdown("**Original:**")
                 st.markdown(f"> {original}")
                 st.markdown("**Suggested rewrite:**")
-                st.code(rewritten, language=None)
+                st.markdown(f'<blockquote style="color: #111; border-left: 4px solid #0f3460;">{rewritten}</blockquote>', unsafe_allow_html=True)
                 if reason:
                     st.caption(reason)
         with col_right:
