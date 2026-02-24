@@ -616,51 +616,72 @@ if "optimized" in st.session_state:
     if not has_original:
         st.warning("Original .docx bytes not available — export will use a basic format.")
 
-    export_btn = st.button(
-        "Export",
-        disabled=not (has_original and company_name.strip()),
-        use_container_width=True,
-        type="primary",
-    )
+    col_exp_word, col_exp_pdf = st.columns(2)
 
-    if export_btn and has_original:
-        with st.spinner("Exporting files…"):
+    with col_exp_word:
+        word_btn = st.button(
+            "Export to Word",
+            disabled=not (has_original and company_name.strip()),
+            use_container_width=True,
+            type="primary",
+        )
+
+    with col_exp_pdf:
+        pdf_btn = st.button(
+            "Export to PDF",
+            disabled=not (has_original and company_name.strip()),
+            use_container_width=True,
+            type="primary",
+        )
+
+    if word_btn and has_original:
+        with st.spinner("Generating Word file…"):
             try:
-                docx_path, pdf_path = export(source_resume.raw_bytes, opt_export, OUTPUT_DIR, company_name.strip())
+                docx_path = export_docx(source_resume.raw_bytes, opt_export, OUTPUT_DIR, company_name.strip())
                 st.session_state["export_docx_path"] = docx_path
-                st.session_state["export_pdf_path"] = pdf_path
-                st.session_state["export_approved"] = True
+                st.session_state["export_word_done"] = True
             except Exception as e:
                 st.error(f"Error: {e}")
 
-    if st.session_state.get("export_approved"):
-        docx_path: Path | None = st.session_state.get("export_docx_path")
-        pdf_path: Path | None = st.session_state.get("export_pdf_path")
+    if pdf_btn and has_original:
+        with st.spinner("Generating PDF…"):
+            try:
+                docx_path = export_docx(source_resume.raw_bytes, opt_export, OUTPUT_DIR, company_name.strip())
+                pdf_path = _convert_to_pdf(docx_path)
+                st.session_state["export_docx_path"] = docx_path
+                st.session_state["export_pdf_path"] = pdf_path
+                st.session_state["export_pdf_done"] = True
+            except Exception as e:
+                st.error(f"Error: {e}")
 
+    if st.session_state.get("export_word_done"):
+        docx_path: Path | None = st.session_state.get("export_docx_path")
         if docx_path and docx_path.exists():
             st.balloons()
-            st.success(f"Exported: `{docx_path.name}`")
-            col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
-                with open(docx_path, "rb") as f:
-                    st.download_button(
-                        label="Download .docx",
-                        data=f.read(),
-                        file_name=docx_path.name,
-                        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                        use_container_width=True,
-                    )
-            with col_dl2:
-                if pdf_path and pdf_path.exists():
-                    with open(pdf_path, "rb") as f:
-                        st.download_button(
-                            label="Download .pdf",
-                            data=f.read(),
-                            file_name=pdf_path.name,
-                            mime="application/pdf",
-                            use_container_width=True,
-                        )
-                else:
-                    st.caption("PDF conversion requires LibreOffice. Download the .docx and convert manually, or install LibreOffice.")
+            st.success(f"Ready: `{docx_path.name}`")
+            with open(docx_path, "rb") as f:
+                st.download_button(
+                    label="Download .docx",
+                    data=f.read(),
+                    file_name=docx_path.name,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+
+    if st.session_state.get("export_pdf_done"):
+        pdf_path: Path | None = st.session_state.get("export_pdf_path")
+        if pdf_path and pdf_path.exists():
+            st.balloons()
+            st.success(f"Ready: `{pdf_path.name}`")
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    label="Download .pdf",
+                    data=f.read(),
+                    file_name=pdf_path.name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+        else:
+            st.warning("PDF conversion requires LibreOffice. Try exporting to Word instead.")
 else:
     st.info("Generate an optimized resume in step 5 first.")
