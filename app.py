@@ -10,13 +10,84 @@ from core.exporter import export
 RESUMES_DIR = Path(__file__).parent / "resumes"
 OUTPUT_DIR = Path(__file__).parent / "output"
 
+STEP_LABELS = [
+    "Job Description",
+    "Your Resumes",
+    "Match & Score",
+    "Improvements",
+    "Optimize & Review",
+    "Export",
+]
+
+STEP_TOOLTIPS = {
+    1: "Paste the full job posting so the AI knows what to optimize for.",
+    2: "Upload one or more .docx resume versions — the AI will compare them.",
+    3: "The AI scores each resume against the job and picks the best match.",
+    4: "Get bullet-by-bullet rewrite suggestions with keywords from the job.",
+    5: "Generate a fully optimized resume and preview it before exporting.",
+    6: "Enter the company name and download the final .docx / .pdf files.",
+}
+
+SAMPLE_JD = """Senior Software Engineer – Acme Corp (Remote)
+
+We are looking for a Senior Software Engineer to join our platform team.
+
+Responsibilities:
+• Design and implement scalable microservices using Python, Go, or Java
+• Lead code reviews and mentor junior engineers
+• Collaborate with product managers to translate requirements into technical solutions
+• Improve CI/CD pipelines and deployment automation
+• Monitor system performance and resolve production incidents
+
+Requirements:
+• 5+ years of professional software engineering experience
+• Strong proficiency in Python or Go
+• Experience with cloud platforms (AWS, GCP, or Azure)
+• Familiarity with containerization (Docker, Kubernetes)
+• Excellent communication and problem-solving skills
+
+Nice to have:
+• Experience with event-driven architectures (Kafka, RabbitMQ)
+• Contributions to open-source projects
+• Background in data engineering or ML infrastructure"""
+
 
 def _get_saved_key() -> str:
-    """Read API key from Streamlit secrets if available."""
     try:
         return st.secrets.get("api_key", "")
     except Exception:
         return ""
+
+
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def _estimate_cost(n_resumes: int, job_tokens: int, resume_tokens: int, model: str) -> str:
+    total_input = job_tokens + resume_tokens * n_resumes + 500
+    total_output = 800 * n_resumes
+    if "gpt-4o-mini" in model or "flash" in model or "haiku" in model:
+        cost = total_input * 0.15 / 1_000_000 + total_output * 0.6 / 1_000_000
+    elif "gpt-4o" in model or "pro" in model or "sonnet" in model:
+        cost = total_input * 2.5 / 1_000_000 + total_output * 10.0 / 1_000_000
+    else:
+        cost = total_input * 5.0 / 1_000_000 + total_output * 15.0 / 1_000_000
+    if cost < 0.01:
+        return f"~{total_input + total_output:,} tokens · < $0.01"
+    return f"~{total_input + total_output:,} tokens · ~${cost:.2f}"
+
+
+def _current_step() -> int:
+    """Determine the furthest completed step."""
+    if st.session_state.get("export_approved"):
+        return 6
+    if "optimized" in st.session_state:
+        return 5
+    if "improvements" in st.session_state:
+        return 4
+    if "match_results" in st.session_state:
+        return 3
+    return 1
 
 
 # ── Page config ──────────────────────────────────────────────────────────────
@@ -35,7 +106,7 @@ st.markdown(
         color: white;
         padding: 2rem 2.5rem;
         border-radius: 12px;
-        margin-bottom: 1.5rem;
+        margin-bottom: 0.5rem;
     }
     .app-header h1 {
         margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.5px;
@@ -43,6 +114,42 @@ st.markdown(
     .app-header p {
         margin: 0.4rem 0 0 0; opacity: 0.8; font-size: 0.95rem;
     }
+
+    /* ── Progress stepper ────────────────────────────────── */
+    .stepper {
+        display: flex; justify-content: space-between; align-items: center;
+        padding: 1rem 0.5rem; margin-bottom: 1rem;
+    }
+    .step {
+        display: flex; flex-direction: column; align-items: center;
+        flex: 1; position: relative;
+    }
+    .step-circle {
+        width: 32px; height: 32px; border-radius: 50%;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.8rem; font-weight: 700;
+        border: 2px solid #cbd5e1; color: #94a3b8; background: white;
+        transition: all 0.3s ease; z-index: 1;
+    }
+    .step-circle.active {
+        border-color: #0f3460; color: white; background: #0f3460;
+    }
+    .step-circle.done {
+        border-color: #059669; color: white; background: #059669;
+    }
+    .step-label {
+        font-size: 0.7rem; margin-top: 4px; color: #94a3b8;
+        text-align: center; white-space: nowrap;
+    }
+    .step-label.active, .step-label.done { color: #1a1a2e; font-weight: 600; }
+
+    /* connector lines */
+    .step:not(:last-child)::after {
+        content: ''; position: absolute;
+        top: 16px; left: calc(50% + 20px); right: calc(-50% + 20px);
+        height: 2px; background: #e2e8f0; z-index: 0;
+    }
+    .step.done:not(:last-child)::after { background: #059669; }
 
     /* ── Section step labels ─────────────────────────────── */
     div[data-testid="stSubheader"] > div > p,
@@ -54,79 +161,72 @@ st.markdown(
     /* ── Metrics / score cards ───────────────────────────── */
     div[data-testid="stMetric"] {
         background: linear-gradient(135deg, #f0f4ff 0%, #f8f9fb 100%);
-        border-radius: 10px;
-        padding: 14px 18px;
-        border: 1px solid #e2e8f0;
+        border-radius: 10px; padding: 14px 18px; border: 1px solid #e2e8f0;
     }
-    div[data-testid="stMetricValue"] > div {
-        font-weight: 700; color: #1a1a2e;
-    }
+    div[data-testid="stMetricValue"] > div { font-weight: 700; color: #1a1a2e; }
 
     /* ── Expanders ───────────────────────────────────────── */
     details[data-testid="stExpander"] {
         border: 1px solid #e2e8f0 !important;
-        border-radius: 8px !important;
-        margin-bottom: 0.5rem;
+        border-radius: 8px !important; margin-bottom: 0.5rem;
         transition: box-shadow 0.2s ease;
     }
     details[data-testid="stExpander"]:hover {
         box-shadow: 0 2px 8px rgba(15, 52, 96, 0.08);
     }
-    details[data-testid="stExpander"] summary {
-        font-weight: 500;
-    }
+    details[data-testid="stExpander"] summary { font-weight: 500; }
 
     /* ── Buttons ─────────────────────────────────────────── */
     .stButton > button[kind="primary"] {
-        border-radius: 8px;
-        font-weight: 600;
-        letter-spacing: 0.3px;
+        border-radius: 8px; font-weight: 600; letter-spacing: 0.3px;
     }
 
     /* ── Sidebar ─────────────────────────────────────────── */
-    section[data-testid="stSidebar"] {
-        background: #fafbfc;
-    }
+    section[data-testid="stSidebar"] { background: #fafbfc; }
     section[data-testid="stSidebar"] .stSelectbox label,
     section[data-testid="stSidebar"] .stTextInput label {
-        font-size: 0.85rem;
-        font-weight: 600;
-        color: #374151;
+        font-size: 0.85rem; font-weight: 600; color: #374151;
     }
 
     /* ── File uploader ───────────────────────────────────── */
     div[data-testid="stFileUploader"] section {
-        border: 2px dashed #cbd5e1 !important;
-        border-radius: 10px !important;
+        border: 2px dashed #cbd5e1 !important; border-radius: 10px !important;
         transition: border-color 0.2s ease;
     }
-    div[data-testid="stFileUploader"] section:hover {
-        border-color: #0f3460 !important;
-    }
+    div[data-testid="stFileUploader"] section:hover { border-color: #0f3460 !important; }
 
-    /* ── Success / info alerts ───────────────────────────── */
-    div[data-testid="stAlert"] {
-        border-radius: 8px;
-    }
+    /* ── Alerts ──────────────────────────────────────────── */
+    div[data-testid="stAlert"] { border-radius: 8px; }
 
     /* ── Score badge ─────────────────────────────────────── */
     .score-badge {
-        display: inline-block;
-        padding: 4px 14px;
-        border-radius: 20px;
-        font-weight: 700;
-        font-size: 1.1rem;
-        color: white;
-        min-width: 60px;
-        text-align: center;
+        display: inline-block; padding: 4px 14px; border-radius: 20px;
+        font-weight: 700; font-size: 1.1rem; color: white;
+        min-width: 60px; text-align: center;
     }
     .score-high   { background: linear-gradient(135deg, #059669, #10b981); }
     .score-medium { background: linear-gradient(135deg, #d97706, #f59e0b); }
     .score-low    { background: linear-gradient(135deg, #dc2626, #ef4444); }
+
+    /* ── Token estimate badge ────────────────────────────── */
+    .token-est {
+        display: inline-block; font-size: 0.78rem; color: #64748b;
+        background: #f1f5f9; padding: 3px 10px; border-radius: 6px;
+        margin-bottom: 0.5rem;
+    }
+
+    /* ── Filename preview ────────────────────────────────── */
+    .filename-preview {
+        font-family: monospace; font-size: 0.85rem; color: #475569;
+        background: #f8fafc; border: 1px solid #e2e8f0;
+        border-radius: 6px; padding: 6px 12px; margin: 0.3rem 0 0.8rem 0;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
+
+# ── Header ───────────────────────────────────────────────────────────────────
 
 st.markdown(
     '<div class="app-header">'
@@ -135,6 +235,29 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True,
 )
+
+# ── Progress stepper ─────────────────────────────────────────────────────────
+
+current = _current_step()
+stepper_html = '<div class="stepper">'
+for i, label in enumerate(STEP_LABELS, 1):
+    if i < current:
+        cls = "done"
+        circle = "✓"
+    elif i == current:
+        cls = "active"
+        circle = str(i)
+    else:
+        cls = ""
+        circle = str(i)
+    stepper_html += (
+        f'<div class="step {cls}">'
+        f'<div class="step-circle {cls}">{circle}</div>'
+        f'<div class="step-label {cls}">{label}</div>'
+        f'</div>'
+    )
+stepper_html += '</div>'
+st.markdown(stepper_html, unsafe_allow_html=True)
 
 # ── Sidebar – settings ───────────────────────────────────────────────────────
 
@@ -173,22 +296,33 @@ with st.sidebar:
         "3. Click **Match Best Resume**\n"
         "4. Get improvement suggestions\n"
         "5. Generate optimized resume & review\n"
-        "6. Approve → export"
+        "6. Export"
     )
 
 base_url = provider["base_url"]
 json_mode = provider["json_mode"]
 
-# ── Load resumes ─────────────────────────────────────────────────────────────
+# ── Step 1 — Job Description ─────────────────────────────────────────────────
 
-st.subheader("1 — Job Description")
+st.subheader("1 — Job Description", help=STEP_TOOLTIPS[1])
+
+def _fill_sample():
+    st.session_state["job_desc_input"] = SAMPLE_JD
+
+col_jd, col_sample = st.columns([4, 1])
+with col_sample:
+    st.button("Try sample", on_click=_fill_sample, use_container_width=True)
+
 job_desc = st.text_area(
     "Paste the job description below",
     height=220,
     placeholder="Copy-paste the full job posting here…",
+    key="job_desc_input",
 )
 
-st.subheader("2 — Your Resumes")
+# ── Step 2 — Your Resumes ────────────────────────────────────────────────────
+
+st.subheader("2 — Your Resumes", help=STEP_TOOLTIPS[2])
 
 uploaded_files = st.file_uploader(
     "Upload .docx resumes",
@@ -230,12 +364,18 @@ else:
     st.info("Upload your `.docx` resumes above to get started.")
     selected_resumes = []
 
-# ── Matching & Scoring ───────────────────────────────────────────────────────
+# ── Step 3 — Match & Score ───────────────────────────────────────────────────
 
-st.subheader("3 — Match Best Resume & Fit Score")
+st.subheader("3 — Match Best Resume & Fit Score", help=STEP_TOOLTIPS[3])
 
 if not api_key:
     st.info("Enter your API key in the sidebar to enable AI features.")
+
+if job_desc and selected_resumes:
+    jt = _estimate_tokens(job_desc)
+    rt = sum(_estimate_tokens(r.full_text) for r in selected_resumes)
+    est = _estimate_cost(len(selected_resumes), jt, rt, active_model)
+    st.markdown(f'<div class="token-est">Estimated: {est}</div>', unsafe_allow_html=True)
 
 match_btn = st.button(
     f"Match Best Resume Version & Provide Fit Score ({len(selected_resumes)} resume{'s' if len(selected_resumes) != 1 else ''})",
@@ -271,9 +411,9 @@ if "match_results" in st.session_state:
             c1.caption(entry.get("filename", "?"))
             c2.write(entry.get("explanation", ""))
 
-# ── Improvement Recommendations ──────────────────────────────────────────────
+# ── Step 4 — Improvement Recommendations ─────────────────────────────────────
 
-st.subheader("4 — Improvement Recommendations")
+st.subheader("4 — Improvement Recommendations", help=STEP_TOOLTIPS[4])
 
 resume_names = [r.filename for r in selected_resumes]
 selected_resume_name = st.selectbox(
@@ -284,6 +424,12 @@ selected_resume_name = st.selectbox(
 selected_resume: Resume | None = next(
     (r for r in selected_resumes if r.filename == selected_resume_name), None
 )
+
+if job_desc and selected_resume:
+    jt = _estimate_tokens(job_desc)
+    rt = _estimate_tokens(selected_resume.full_text)
+    est = _estimate_cost(1, jt, rt, active_model)
+    st.markdown(f'<div class="token-est">Estimated: {est}</div>', unsafe_allow_html=True)
 
 improve_btn = st.button(
     "Get Improvement Suggestions",
@@ -367,9 +513,15 @@ if "improvements" in st.session_state:
         for rm in imp["bullets_to_remove"]:
             st.markdown(f"- ~~{rm.get('bullet', '?')}~~ ({rm.get('section', '?')}) — {rm.get('reason', '')}")
 
-# ── Optimize & Review ────────────────────────────────────────────────────────
+# ── Step 5 — Optimize & Review ───────────────────────────────────────────────
 
-st.subheader("5 — Optimize & Review")
+st.subheader("5 — Optimize & Review", help=STEP_TOOLTIPS[5])
+
+if job_desc and selected_resume:
+    jt = _estimate_tokens(job_desc)
+    rt = _estimate_tokens(selected_resume.full_text)
+    est = _estimate_cost(1, jt, rt, active_model)
+    st.markdown(f'<div class="token-est">Estimated: {est}</div>', unsafe_allow_html=True)
 
 optimize_btn = st.button(
     "Generate Optimized Resume",
@@ -407,9 +559,24 @@ if "optimized" in st.session_state:
             for b in sec.get("bullets", []):
                 st.markdown(f"- {b}")
 
-# ── Export ───────────────────────────────────────────────────────────────────
+    # Copy to clipboard
+    clipboard_lines = []
+    for sec in opt.get("sections", []):
+        clipboard_lines.append(sec.get("heading", "").upper())
+        if sec.get("content"):
+            clipboard_lines.append(sec["content"])
+        for b in sec.get("bullets", []):
+            clipboard_lines.append(f"• {b}")
+        clipboard_lines.append("")
+    clipboard_text = "\n".join(clipboard_lines)
 
-st.subheader("6 — Export")
+    if st.button("📋 Copy optimized resume to clipboard", use_container_width=True):
+        st.code(clipboard_text, language=None)
+        st.info("Select all text above and copy (Ctrl+C / Cmd+C).")
+
+# ── Step 6 — Export ──────────────────────────────────────────────────────────
+
+st.subheader("6 — Export", help=STEP_TOOLTIPS[6])
 
 if "optimized" in st.session_state:
     opt_export = st.session_state["optimized"]
@@ -422,6 +589,18 @@ if "optimized" in st.session_state:
         placeholder="e.g. Google, McKinsey, Tesla…",
         key="company_name_export",
     )
+
+    # Filename preview
+    if company_name.strip():
+        cand_name = opt_export.get("name", "Candidate").strip()
+        parts = cand_name.split()
+        first, last = (parts[0], parts[-1]) if len(parts) >= 2 else (cand_name, "")
+        safe = lambda s: s.replace(" ", "_").replace("/", "_")
+        preview_stem = f"{safe(first)}_{safe(last)}_Resume_{safe(company_name.strip())}"
+        st.markdown(
+            f'<div class="filename-preview">📁 {preview_stem}.docx &nbsp;/&nbsp; {preview_stem}.pdf</div>',
+            unsafe_allow_html=True,
+        )
 
     if not has_original:
         st.warning("Original .docx bytes not available — export will use a basic format.")
@@ -448,6 +627,7 @@ if "optimized" in st.session_state:
         pdf_path: Path | None = st.session_state.get("export_pdf_path")
 
         if docx_path and docx_path.exists():
+            st.balloons()
             st.success(f"Exported: `{docx_path.name}`")
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
