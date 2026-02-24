@@ -489,7 +489,7 @@ if "improvements" in st.session_state:
                 st.markdown("**Original:**")
                 st.markdown(f"> {original}")
                 st.markdown("**Suggested rewrite:**")
-                st.markdown(f"> {rewritten}")
+                st.code(rewritten, language=None)
                 if reason:
                     st.caption(reason)
         with col_right:
