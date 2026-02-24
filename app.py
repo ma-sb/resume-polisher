@@ -26,17 +26,115 @@ st.set_page_config(page_title="Resume Polisher", page_icon="📄", layout="wide"
 st.markdown(
     """
     <style>
-    .block-container {padding-top: 2rem;}
-    div[data-testid="stMetric"] {
-        background: #f8f9fb; border-radius: 8px; padding: 12px 16px;
+    /* ── Global ──────────────────────────────────────────── */
+    .block-container {padding-top: 1.5rem; max-width: 960px;}
+
+    /* ── Header banner ───────────────────────────────────── */
+    .app-header {
+        background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+        color: white;
+        padding: 2rem 2.5rem;
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
     }
+    .app-header h1 {
+        margin: 0; font-size: 2rem; font-weight: 700; letter-spacing: -0.5px;
+    }
+    .app-header p {
+        margin: 0.4rem 0 0 0; opacity: 0.8; font-size: 0.95rem;
+    }
+
+    /* ── Section step labels ─────────────────────────────── */
+    div[data-testid="stSubheader"] > div > p,
+    .stSubheader {
+        border-left: 4px solid #0f3460;
+        padding-left: 0.75rem;
+    }
+
+    /* ── Metrics / score cards ───────────────────────────── */
+    div[data-testid="stMetric"] {
+        background: linear-gradient(135deg, #f0f4ff 0%, #f8f9fb 100%);
+        border-radius: 10px;
+        padding: 14px 18px;
+        border: 1px solid #e2e8f0;
+    }
+    div[data-testid="stMetricValue"] > div {
+        font-weight: 700; color: #1a1a2e;
+    }
+
+    /* ── Expanders ───────────────────────────────────────── */
+    details[data-testid="stExpander"] {
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 8px !important;
+        margin-bottom: 0.5rem;
+        transition: box-shadow 0.2s ease;
+    }
+    details[data-testid="stExpander"]:hover {
+        box-shadow: 0 2px 8px rgba(15, 52, 96, 0.08);
+    }
+    details[data-testid="stExpander"] summary {
+        font-weight: 500;
+    }
+
+    /* ── Buttons ─────────────────────────────────────────── */
+    .stButton > button[kind="primary"] {
+        border-radius: 8px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+    }
+
+    /* ── Sidebar ─────────────────────────────────────────── */
+    section[data-testid="stSidebar"] {
+        background: #fafbfc;
+    }
+    section[data-testid="stSidebar"] .stSelectbox label,
+    section[data-testid="stSidebar"] .stTextInput label {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #374151;
+    }
+
+    /* ── File uploader ───────────────────────────────────── */
+    div[data-testid="stFileUploader"] section {
+        border: 2px dashed #cbd5e1 !important;
+        border-radius: 10px !important;
+        transition: border-color 0.2s ease;
+    }
+    div[data-testid="stFileUploader"] section:hover {
+        border-color: #0f3460 !important;
+    }
+
+    /* ── Success / info alerts ───────────────────────────── */
+    div[data-testid="stAlert"] {
+        border-radius: 8px;
+    }
+
+    /* ── Score badge ─────────────────────────────────────── */
+    .score-badge {
+        display: inline-block;
+        padding: 4px 14px;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: white;
+        min-width: 60px;
+        text-align: center;
+    }
+    .score-high   { background: linear-gradient(135deg, #059669, #10b981); }
+    .score-medium { background: linear-gradient(135deg, #d97706, #f59e0b); }
+    .score-low    { background: linear-gradient(135deg, #dc2626, #ef4444); }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.title("Resume Polisher")
-st.caption("AI-powered resume evaluation, matching, and optimization")
+st.markdown(
+    '<div class="app-header">'
+    "<h1>Resume Polisher</h1>"
+    "<p>AI-powered resume evaluation, matching, and optimization</p>"
+    "</div>",
+    unsafe_allow_html=True,
+)
 
 # ── Sidebar – settings ───────────────────────────────────────────────────────
 
@@ -163,11 +261,15 @@ if "match_results" in st.session_state:
 
     for entry in results.get("results", []):
         score = entry.get("score", 0)
-        icon = "🟢" if score >= 75 else "🟡" if score >= 50 else "🔴"
+        css_class = "score-high" if score >= 75 else "score-medium" if score >= 50 else "score-low"
         with st.container():
             c1, c2 = st.columns([1, 3])
-            c1.metric(entry.get("filename", "?"), f"{score}%", label_visibility="visible")
-            c2.write(f"{icon} {entry.get('explanation', '')}")
+            c1.markdown(
+                f'<span class="score-badge {css_class}">{score}%</span>',
+                unsafe_allow_html=True,
+            )
+            c1.caption(entry.get("filename", "?"))
+            c2.write(entry.get("explanation", ""))
 
 # ── Improvement Recommendations ──────────────────────────────────────────────
 
