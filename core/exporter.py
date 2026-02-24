@@ -10,12 +10,24 @@ from docx import Document
 
 
 def _replace_paragraph_text(para, new_text: str):
-    """Replace a paragraph's visible text while preserving the first run's formatting."""
+    """Replace a paragraph's visible text while preserving run formatting.
+
+    Puts new text in the first run, blanks middle runs, and keeps
+    trailing whitespace/punctuation runs intact so tabs, periods,
+    and alignment characters at the end of the line stay as-is.
+    """
     if not para.runs:
         para.text = new_text
         return
+
+    trail_start = len(para.runs)
+    for i in range(len(para.runs) - 1, 0, -1):
+        if para.runs[i].text.strip(" \t.,:;"):
+            break
+        trail_start = i
+
     para.runs[0].text = new_text
-    for run in para.runs[1:]:
+    for run in para.runs[1:trail_start]:
         run.text = ""
 
 
