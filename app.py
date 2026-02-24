@@ -551,9 +551,18 @@ if optimize_btn and selected_resume:
 if "optimized" in st.session_state:
     opt = st.session_state["optimized"]
 
+    fit_score = opt.get("job_fit_score", 0)
     fit_summary = opt.get("job_fit_summary", "")
-    if fit_summary:
-        st.success(f"**Job fit:** {fit_summary}")
+    if fit_summary or fit_score:
+        score_css = "score-high" if fit_score >= 75 else "score-medium" if fit_score >= 50 else "score-low"
+        col_score, col_summary = st.columns([1, 4])
+        with col_score:
+            st.markdown(
+                f'<span class="score-badge {score_css}">{fit_score}%</span>',
+                unsafe_allow_html=True,
+            )
+        with col_summary:
+            st.success(f"**Job fit:** {fit_summary}")
 
     preview_pdf: Path | None = st.session_state.get("preview_pdf_path")
     preview_docx: Path | None = st.session_state.get("preview_docx_path")

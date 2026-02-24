@@ -117,7 +117,7 @@ PROCESS:
 2. Go through every bullet point and paragraph in the resume.
    Reword each one so that relevant keywords from the job description are
    incorporated naturally into the candidate's existing experience.
-3. Write a single-sentence job fit summary that describes how well the
+3. Assign a job fit score from 0-100 and write a single-sentence job fit summary that describes how well the
    optimized resume now fits the target position.
 4. Output the full optimized resume.
 
@@ -141,6 +141,7 @@ You MUST use exactly these key names in your JSON. Do not rename them.
 Return ONLY valid JSON (no markdown fences):
 {
   "name": "candidate name",
+  "job_fit_score": 0,
   "job_fit_summary": "one sentence summarizing how well this optimized resume fits the job",
   "sections": [
     {
