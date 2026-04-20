@@ -35,6 +35,31 @@ Return ONLY valid JSON:
   "soft_skills_used": ["skill1", "skill2"]
 }"""
 
+_COVER_LETTER_REVISE_SYSTEM = """You are an expert career coach revising a cover-letter draft.
+You will receive:
+- job description
+- source resume facts
+- style preferences
+- optional user context fields
+- current draft
+- manual user feedback
+- optional chat history
+
+Revise the draft based on the user's feedback while keeping all claims grounded in provided facts.
+
+STRICT RULES (must follow):
+- Use only facts from the provided resume/source data.
+- Do not hallucinate projects, roles, tools, dates, or achievements.
+- Apply the user feedback directly and concretely.
+- Keep the draft professional and concise for the selected length/tone.
+- Return only the revised cover letter body text (no date/header/signature block).
+
+Return ONLY valid JSON:
+{
+  "draft": "<revised cover letter body text only>",
+  "soft_skills_used": ["skill1", "skill2"]
+}"""
+
 
 def _make_client(api_key: str, base_url: str = "") -> OpenAI:
     kwargs: dict = {"api_key": api_key}
@@ -180,6 +205,86 @@ USER CONTEXT:
         client=client,
         model=model,
         system=_COVER_LETTER_SYSTEM,
+        user=user_prompt,
+        temperature=0.4,
+        json_mode=json_mode,
+    )
+
+
+def revise_cover_letter_with_feedback(
+    *,
+    job_description: str,
+    resume_text: str,
+    current_draft: str,
+    feedback: str,
+    api_key: str,
+    model: str,
+    base_url: str = "",
+    json_mode: bool = True,
+    tone: str,
+    length: str,
+    hiring_manager_name: str = "",
+    job_title: str = "",
+    company_name: str = "",
+    why_company: str = "",
+    why_position: str = "",
+    chat_history: list[dict] | None = None,
+) -> dict:
+    """Revise a cover letter draft using manual user feedback."""
+    client = _make_client(api_key, base_url)
+    length_instruction = {
+        "Short (150)": "Target about 150 words.",
+        "Standard (250)": "Target about 250 words.",
+        "Long (400-500)": "Target 400-500 words.",
+    }.get(length, "Target about 250 words.")
+
+    history_text = ""
+    if chat_history:
+        turns: list[str] = []
+        for msg in chat_history[-8:]:
+            role = (msg.get("role") or "").strip().lower()
+            content = (msg.get("content") or "").strip()
+            if not content:
+                continue
+            if role == "user":
+                turns.append(f"USER: {content}")
+            elif role == "assistant":
+                turns.append(f"ASSISTANT: {content}")
+        history_text = "\n".join(turns)
+
+    user_prompt = f"""
+TASK: REVISE EXISTING DRAFT BASED ON USER FEEDBACK
+
+TONE: {tone}
+LENGTH: {length} ({length_instruction})
+
+JOB DESCRIPTION:
+{job_description}
+
+SOURCE RESUME FACTS:
+{resume_text}
+
+USER CONTEXT:
+- Hiring Manager Name: {hiring_manager_name or "(not provided)"}
+- Job Title: {job_title or "(not provided)"}
+- Company Name: {company_name or "(not provided)"}
+- Why this company: {why_company or "(not provided)"}
+- Why this position: {why_position or "(not provided)"}
+
+CURRENT DRAFT:
+{current_draft}
+
+LATEST USER FEEDBACK:
+{feedback}
+""".strip()
+
+    if history_text:
+        user_prompt += f"\n\nRECENT REVISION CHAT HISTORY:\n{history_text}\n"
+
+    return _call(
+        client=client,
+        model=model,
+        system=_COVER_LETTER_REVISE_SYSTEM,
         user=user_prompt,
         temperature=0.4,
         json_mode=json_mode,

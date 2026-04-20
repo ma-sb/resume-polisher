@@ -10,6 +10,7 @@ from core.exporter import export_docx, _convert_to_pdf
 from core.cover_letter import (
     resume_payload_from_source,
     generate_cover_letter,
+    revise_cover_letter_with_feedback,
     build_export_letter,
     export_cover_letter_docx,
 )
@@ -313,7 +314,7 @@ with st.sidebar:
         "4. Get improvement suggestions\n"
         "5. Generate optimized resume & review\n"
         "6. Export\n"
-        "7. (Optional) Generate and export a cover letter"
+        "7. Generate and export a cover letter"
     )
 
 base_url = provider["base_url"]
@@ -729,12 +730,16 @@ if "optimized" in st.session_state:
 else:
     st.info("Generate an optimized resume in step 5 first.")
 
-# ── Step 7 — Cover Letter (Optional) ─────────────────────────────────────────
+# ── Step 7 — Cover Letter ────────────────────────────────────────────────────
 
-st.subheader("7 — Cover Letter (Optional)", help=STEP_TOOLTIPS[7])
+st.subheader("7 — Cover Letter", help=STEP_TOOLTIPS[7])
 
 if "cover_letter_company_name" not in st.session_state:
     st.session_state["cover_letter_company_name"] = st.session_state.get("company_name_export", "")
+if "cover_letter_chat_open" not in st.session_state:
+    st.session_state["cover_letter_chat_open"] = False
+if "cover_letter_chat_history" not in st.session_state:
+    st.session_state["cover_letter_chat_history"] = []
 
 optimized_source = st.session_state.get("optimized")
 fallback_resume: Resume | None = None
@@ -860,35 +865,13 @@ if gen_btn or regen_btn:
             st.session_state["cover_letter_generated"] = draft
             st.session_state["cover_letter_edited_draft"] = draft
             st.session_state["cover_letter_soft_skills_used"] = cl_result.get("soft_skills_used", [])
+            st.session_state["cover_letter_chat_history"] = []
+            st.session_state["cover_letter_chat_open"] = False
         except Exception as e:
             st.error(f"Error generating cover letter: {e}")
 
 if improve_draft_btn:
-    with st.spinner("Improving draft…"):
-        try:
-            cl_result = generate_cover_letter(
-                job_description=job_desc,
-                resume_text=source_resume_text,
-                api_key=api_key,
-                model=active_model,
-                base_url=base_url,
-                json_mode=json_mode,
-                tone=tone,
-                length=length,
-                hiring_manager_name=hiring_manager_name,
-                job_title=job_title_cl,
-                company_name=company_name_cl,
-                why_company=why_company,
-                why_position=why_position,
-                existing_draft=st.session_state.get("cover_letter_edited_draft", ""),
-                improve_mode=True,
-            )
-            draft = (cl_result.get("draft") or "").strip()
-            st.session_state["cover_letter_generated"] = draft
-            st.session_state["cover_letter_edited_draft"] = draft
-            st.session_state["cover_letter_soft_skills_used"] = cl_result.get("soft_skills_used", [])
-        except Exception as e:
-            st.error(f"Error improving draft: {e}")
+    st.session_state["cover_letter_chat_open"] = True
 
 if st.session_state.get("cover_letter_generated"):
     if st.session_state.get("cover_letter_soft_skills_used"):
@@ -900,6 +883,52 @@ if st.session_state.get("cover_letter_generated"):
         key="cover_letter_edited_draft",
         height=320,
     )
+
+    if st.session_state.get("cover_letter_chat_open"):
+        st.markdown("### Cover letter revision chat")
+        st.caption("Give concrete feedback (e.g., make it shorter, add stronger leadership language).")
+
+        for msg in st.session_state.get("cover_letter_chat_history", []):
+            with st.chat_message("user" if msg.get("role") == "user" else "assistant"):
+                st.write(msg.get("content", ""))
+
+        feedback = st.chat_input("How should the draft be improved?")
+        if feedback:
+            st.session_state["cover_letter_chat_history"].append({
+                "role": "user",
+                "content": feedback,
+            })
+            with st.spinner("Revising draft with your feedback…"):
+                try:
+                    cl_result = revise_cover_letter_with_feedback(
+                        job_description=job_desc,
+                        resume_text=source_resume_text,
+                        current_draft=st.session_state.get("cover_letter_edited_draft", ""),
+                        feedback=feedback,
+                        api_key=api_key,
+                        model=active_model,
+                        base_url=base_url,
+                        json_mode=json_mode,
+                        tone=tone,
+                        length=length,
+                        hiring_manager_name=hiring_manager_name,
+                        job_title=job_title_cl,
+                        company_name=company_name_cl,
+                        why_company=why_company,
+                        why_position=why_position,
+                        chat_history=st.session_state.get("cover_letter_chat_history", []),
+                    )
+                    draft = (cl_result.get("draft") or "").strip()
+                    st.session_state["cover_letter_generated"] = draft
+                    st.session_state["cover_letter_edited_draft"] = draft
+                    st.session_state["cover_letter_soft_skills_used"] = cl_result.get("soft_skills_used", [])
+                    st.session_state["cover_letter_chat_history"].append({
+                        "role": "assistant",
+                        "content": draft,
+                    })
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Error improving draft: {e}")
 
     export_ready = bool(st.session_state.get("cover_letter_edited_draft", "").strip() and company_name_cl.strip())
     if not company_name_cl.strip():
