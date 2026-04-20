@@ -4,9 +4,15 @@ import base64
 import streamlit as st
 from pathlib import Path
 
-from core.reader import load_resumes, read_docx_from_bytes, Resume
+from core.reader import load_resumes, read_resume_from_bytes, Resume
 from core.matcher import PROVIDERS, match_resumes, get_improvements, optimize_resume
 from core.exporter import export, export_docx, _convert_to_pdf
+from core.cover_letter import (
+    resume_payload_from_source,
+    generate_cover_letter,
+    build_export_letter,
+    export_cover_letter_docx,
+)
 
 RESUMES_DIR = Path(__file__).parent / "resumes"
 OUTPUT_DIR = Path(__file__).parent / "output"
@@ -18,6 +24,7 @@ STEP_LABELS = [
     "Improvements",
     "Optimize & Review",
     "Export",
+    "Cover Letter",
 ]
 
 STEP_TOOLTIPS = {
@@ -27,30 +34,36 @@ STEP_TOOLTIPS = {
     4: "Get bullet-by-bullet rewrite suggestions with keywords from the job.",
     5: "Generate a fully optimized resume and preview it before exporting.",
     6: "Enter the company name and download the final .docx / .pdf files.",
+    7: "Optionally generate, edit, improve, and export a tailored cover letter.",
 }
 
-SAMPLE_JD = """Senior Software Engineer – Acme Corp (Remote)
+SAMPLE_JD = """Data Scientist, New York, NY - BCG X
 
-We are looking for a Senior Software Engineer to join our platform team.
+What You'll Do
 
-Responsibilities:
-• Design and implement scalable microservices using Python, Go, or Java
-• Lead code reviews and mentor junior engineers
-• Collaborate with product managers to translate requirements into technical solutions
-• Improve CI/CD pipelines and deployment automation
-• Monitor system performance and resolve production incidents
+Our BCG X teams own the full analytics value-chain end to end: framing new business challenges, designing innovative algorithms, implementing, and deploying scalable solutions, and enabling colleagues and clients to fully embrace AI. Our product offerings span from fully custom-builds to industry specific leading edge AI software solutions. 
 
-Requirements:
-• 5+ years of professional software engineering experience
-• Strong proficiency in Python or Go
-• Experience with cloud platforms (AWS, GCP, or Azure)
-• Familiarity with containerization (Docker, Kubernetes)
-• Excellent communication and problem-solving skills
+As a Data Scientist and Senior Data Scientist, you'll be part of our rapidly growing team. You'll have the chance to apply data science methods and analytics to real-world business situations across a variety of industries to drive significant business impact. You'll have the chance to partner with clients in a variety of BCG regions and industries, and on key topics like climate change, enabling them to design, build, and deploy new and innovative solutions. 
 
-Nice to have:
-• Experience with event-driven architectures (Kafka, RabbitMQ)
-• Contributions to open-source projects
-• Background in data engineering or ML infrastructure"""
+Additional responsibilities will include developing and delivering thought leadership in scientific communities and papers as well as leading conferences on behalf of BCG X. Successful candidates are intellectually curious builders who are biased toward action, scrappy, and communicative. 
+
+
+We are looking for talented individuals with a passion for data science, statistics, operations research and transforming organizations into AI led innovative companies. Successful candidates possess the following: 
+
+    Comfortable in a client-facing role with the ambition to lead teams 
+
+    Likes to distill complex results or processes into simple, clear visualizations 
+
+    Explain sophisticated data science concepts in an understandable manner 
+
+    Love building things and are comfortable working with modern development tools and writing code collaboratively (bonus points if you have a software development or DevOps experience) 
+
+    Significant experience applying advanced analytics to a variety of business situations and a proven ability to synthesize complex data 
+
+    Deep understanding of modern machine learning techniques and their mathematical underpinnings, and can translate this into business implications for our clients 
+
+    Have strong project management skills 
+    Master's degree or PhD in relevant field of study - please provide all academic certificates showing the final grades (A-level, Bachelor, Master) """
 
 
 def _get_saved_key() -> str:
@@ -80,6 +93,8 @@ def _estimate_cost(n_resumes: int, job_tokens: int, resume_tokens: int, model: s
 
 def _current_step() -> int:
     """Determine the furthest completed step."""
+    if st.session_state.get("cover_letter_generated"):
+        return 7
     if st.session_state.get("export_approved"):
         return 6
     if "optimized" in st.session_state:
@@ -292,12 +307,13 @@ with st.sidebar:
     st.divider()
     st.markdown("**How to use**")
     st.markdown(
-        "1. Upload your `.docx` resumes\n"
+        "1. Upload your `.docx`, `.pdf`, or `.doc` resumes\n"
         "2. Paste the job description\n"
         "3. Click **Match Best Resume**\n"
         "4. Get improvement suggestions\n"
         "5. Generate optimized resume & review\n"
-        "6. Export"
+        "6. Export\n"
+        "7. (Optional) Generate and export a cover letter"
     )
 
 base_url = provider["base_url"]
@@ -326,10 +342,10 @@ job_desc = st.text_area(
 st.subheader("2 — Your Resumes", help=STEP_TOOLTIPS[2])
 
 uploaded_files = st.file_uploader(
-    "Upload .docx resumes",
-    type=["docx"],
+    "Upload resumes (.docx, .pdf, .doc)",
+    type=["docx", "pdf", "doc"],
     accept_multiple_files=True,
-    help="Drag and drop one or more .docx resume files.",
+    help="Drag and drop one or more .docx, .pdf, or .doc resume files.",
 )
 
 all_resumes: list[Resume] = []
@@ -337,7 +353,7 @@ all_resumes: list[Resume] = []
 if uploaded_files:
     for uf in uploaded_files:
         try:
-            resume = read_docx_from_bytes(uf.getvalue(), uf.name)
+            resume = read_resume_from_bytes(uf.getvalue(), uf.name)
             all_resumes.append(resume)
         except Exception as e:
             st.warning(f"Could not parse {uf.name}: {e}")
@@ -362,7 +378,7 @@ if all_resumes:
             st.text(r.full_text[:500] + ("…" if len(r.full_text) > 500 else ""))
             st.divider()
 else:
-    st.info("Upload your `.docx` resumes above to get started.")
+    st.info("Upload your `.docx`, `.pdf`, or `.doc` resumes above to get started.")
     selected_resumes = []
 
 # ── Step 3 — Match & Score ───────────────────────────────────────────────────
@@ -417,10 +433,19 @@ if "match_results" in st.session_state:
 st.subheader("4 — Improvement Recommendations", help=STEP_TOOLTIPS[4])
 
 resume_names = [r.filename for r in selected_resumes]
-selected_resume_name = st.selectbox(
-    "Choose a resume to improve",
-    resume_names if resume_names else ["(no resumes loaded)"],
-)
+best_resume_name = ""
+if "match_results" in st.session_state:
+    best_resume_name = st.session_state["match_results"].get("best_resume", "")
+
+if resume_names:
+    if best_resume_name in resume_names:
+        selected_resume_name = best_resume_name
+        st.info(f"Auto-selected best match from Step 3: `{selected_resume_name}`")
+    else:
+        selected_resume_name = resume_names[0]
+        st.caption(f"No Step 3 best-match result found yet. Using `{selected_resume_name}`.")
+else:
+    selected_resume_name = "(no resumes loaded)"
 
 selected_resume: Resume | None = next(
     (r for r in selected_resumes if r.filename == selected_resume_name), None
@@ -623,7 +648,10 @@ if "optimized" in st.session_state:
         )
 
     if not has_original:
-        st.warning("Original .docx bytes not available — export will use a basic format.")
+        st.warning(
+            "A .docx template is required for export-preserving formatting. "
+            "Use a .docx resume (or a .doc that can be converted) for full export."
+        )
 
     col_exp_word, col_exp_pdf = st.columns(2)
 
@@ -649,6 +677,7 @@ if "optimized" in st.session_state:
                 docx_path = export_docx(source_resume.raw_bytes, opt_export, OUTPUT_DIR, company_name.strip())
                 st.session_state["export_docx_path"] = docx_path
                 st.session_state["export_word_done"] = True
+                st.session_state["export_word_celebrated"] = False
             except Exception as e:
                 st.error(f"Error: {e}")
 
@@ -660,13 +689,16 @@ if "optimized" in st.session_state:
                 st.session_state["export_docx_path"] = docx_path
                 st.session_state["export_pdf_path"] = pdf_path
                 st.session_state["export_pdf_done"] = True
+                st.session_state["export_pdf_celebrated"] = False
             except Exception as e:
                 st.error(f"Error: {e}")
 
     if st.session_state.get("export_word_done"):
         docx_path: Path | None = st.session_state.get("export_docx_path")
         if docx_path and docx_path.exists():
-            st.balloons()
+            if not st.session_state.get("export_word_celebrated", False):
+                st.balloons()
+                st.session_state["export_word_celebrated"] = True
             st.success(f"Ready: `{docx_path.name}`")
             with open(docx_path, "rb") as f:
                 st.download_button(
@@ -680,7 +712,9 @@ if "optimized" in st.session_state:
     if st.session_state.get("export_pdf_done"):
         pdf_path: Path | None = st.session_state.get("export_pdf_path")
         if pdf_path and pdf_path.exists():
-            st.balloons()
+            if not st.session_state.get("export_pdf_celebrated", False):
+                st.balloons()
+                st.session_state["export_pdf_celebrated"] = True
             st.success(f"Ready: `{pdf_path.name}`")
             with open(pdf_path, "rb") as f:
                 st.download_button(
@@ -694,3 +728,265 @@ if "optimized" in st.session_state:
             st.warning("PDF conversion requires LibreOffice. Try exporting to Word instead.")
 else:
     st.info("Generate an optimized resume in step 5 first.")
+
+# ── Step 7 — Cover Letter (Optional) ─────────────────────────────────────────
+
+st.subheader("7 — Cover Letter (Optional)", help=STEP_TOOLTIPS[7])
+
+if "cover_letter_company_name" not in st.session_state:
+    st.session_state["cover_letter_company_name"] = st.session_state.get("company_name_export", "")
+
+optimized_source = st.session_state.get("optimized")
+fallback_resume: Resume | None = None
+fallback_name = ""
+
+if not optimized_source and "match_results" in st.session_state:
+    best_name = st.session_state["match_results"].get("best_resume", "")
+    # Use the Step 3 best match even if it is not currently selected in Step 2.
+    fallback_resume = next((r for r in all_resumes if r.filename == best_name), None)
+    fallback_name = best_name
+
+source_label, source_candidate_name, source_resume_text = resume_payload_from_source(
+    optimized_source, fallback_resume
+)
+
+if source_label == "optimized_resume_step_5":
+    st.success("Using optimized resume from Step 5 as cover letter source.")
+elif source_label == "best_resume_step_3":
+    st.info(f"Using best matched resume from Step 3: `{fallback_name}`.")
+else:
+    st.warning(
+        "No source resume available yet. Generate an optimized resume in Step 5, "
+        "or run Step 3 matching so the best resume can be used."
+    )
+
+if source_label:
+    st.session_state["cover_letter_source_meta"] = {
+        "source": source_label,
+        "candidate_name": source_candidate_name,
+        "fallback_resume_filename": fallback_name,
+    }
+
+col_tone, col_length = st.columns(2)
+with col_tone:
+    tone = st.selectbox(
+        "Tone / style",
+        ["Professional", "Confident", "Warm", "Concise", "Technical", "Casual"],
+        key="cover_letter_tone",
+    )
+with col_length:
+    length = st.selectbox(
+        "Length",
+        ["Short (150)", "Standard (250)", "Long (400-500)"],
+        key="cover_letter_length",
+    )
+
+col_hm, col_job = st.columns(2)
+with col_hm:
+    hiring_manager_name = st.text_input(
+        "Hiring manager name (optional)",
+        key="cover_letter_hiring_manager_name",
+        placeholder="e.g. Alex Johnson",
+    )
+with col_job:
+    job_title_cl = st.text_input(
+        "Job title (optional)",
+        key="cover_letter_job_title",
+        placeholder="e.g. Senior Data Scientist",
+    )
+
+company_name_cl = st.text_input(
+    "Company name (optional for draft; required for export filename)",
+    key="cover_letter_company_name",
+    placeholder="e.g. Google",
+)
+why_company = st.text_area(
+    "Why this company (optional)",
+    key="cover_letter_why_company",
+    height=90,
+    placeholder="Optional: mention what attracts you to this company.",
+)
+why_position = st.text_area(
+    "Why this position (optional)",
+    key="cover_letter_why_position",
+    height=90,
+    placeholder="Optional: mention why this role is a strong fit.",
+)
+
+generate_disabled = not (api_key and job_desc and source_label)
+
+col_gen, col_regen, col_improve = st.columns(3)
+with col_gen:
+    gen_btn = st.button(
+        "Generate Cover Letter",
+        disabled=generate_disabled,
+        use_container_width=True,
+        type="primary",
+    )
+with col_regen:
+    regen_btn = st.button(
+        "Regenerate",
+        disabled=generate_disabled,
+        use_container_width=True,
+    )
+with col_improve:
+    improve_draft_btn = st.button(
+        "Improve This Draft",
+        disabled=generate_disabled or not st.session_state.get("cover_letter_edited_draft"),
+        use_container_width=True,
+    )
+
+if gen_btn or regen_btn:
+    with st.spinner("Generating cover letter…"):
+        try:
+            cl_result = generate_cover_letter(
+                job_description=job_desc,
+                resume_text=source_resume_text,
+                api_key=api_key,
+                model=active_model,
+                base_url=base_url,
+                json_mode=json_mode,
+                tone=tone,
+                length=length,
+                hiring_manager_name=hiring_manager_name,
+                job_title=job_title_cl,
+                company_name=company_name_cl,
+                why_company=why_company,
+                why_position=why_position,
+                existing_draft="",
+                improve_mode=False,
+            )
+            draft = (cl_result.get("draft") or "").strip()
+            st.session_state["cover_letter_generated"] = draft
+            st.session_state["cover_letter_edited_draft"] = draft
+            st.session_state["cover_letter_soft_skills_used"] = cl_result.get("soft_skills_used", [])
+        except Exception as e:
+            st.error(f"Error generating cover letter: {e}")
+
+if improve_draft_btn:
+    with st.spinner("Improving draft…"):
+        try:
+            cl_result = generate_cover_letter(
+                job_description=job_desc,
+                resume_text=source_resume_text,
+                api_key=api_key,
+                model=active_model,
+                base_url=base_url,
+                json_mode=json_mode,
+                tone=tone,
+                length=length,
+                hiring_manager_name=hiring_manager_name,
+                job_title=job_title_cl,
+                company_name=company_name_cl,
+                why_company=why_company,
+                why_position=why_position,
+                existing_draft=st.session_state.get("cover_letter_edited_draft", ""),
+                improve_mode=True,
+            )
+            draft = (cl_result.get("draft") or "").strip()
+            st.session_state["cover_letter_generated"] = draft
+            st.session_state["cover_letter_edited_draft"] = draft
+            st.session_state["cover_letter_soft_skills_used"] = cl_result.get("soft_skills_used", [])
+        except Exception as e:
+            st.error(f"Error improving draft: {e}")
+
+if st.session_state.get("cover_letter_generated"):
+    if st.session_state.get("cover_letter_soft_skills_used"):
+        skills = st.session_state["cover_letter_soft_skills_used"]
+        st.caption("Soft skills emphasized: " + ", ".join(f"`{s}`" for s in skills))
+
+    st.text_area(
+        "Edit your cover letter draft (modern simplified format)",
+        key="cover_letter_edited_draft",
+        height=320,
+    )
+
+    export_ready = bool(st.session_state.get("cover_letter_edited_draft", "").strip() and company_name_cl.strip())
+    if not company_name_cl.strip():
+        st.caption("Add company name to enable cover letter export.")
+
+    cexp_docx, cexp_pdf = st.columns(2)
+    with cexp_docx:
+        export_cl_docx_btn = st.button(
+            "Export Cover Letter to Word",
+            disabled=not export_ready,
+            use_container_width=True,
+            type="primary",
+        )
+    with cexp_pdf:
+        export_cl_pdf_btn = st.button(
+            "Export Cover Letter to PDF",
+            disabled=not export_ready,
+            use_container_width=True,
+            type="primary",
+        )
+
+    if export_cl_docx_btn:
+        with st.spinner("Generating cover letter .docx…"):
+            try:
+                business_text = build_export_letter(
+                    draft_body=st.session_state["cover_letter_edited_draft"],
+                    candidate_name=source_candidate_name,
+                    hiring_manager_name=hiring_manager_name,
+                    job_title=job_title_cl,
+                    company_name=company_name_cl,
+                )
+                cl_docx = export_cover_letter_docx(
+                    cover_letter_text=business_text,
+                    candidate_name=source_candidate_name,
+                    company_name=company_name_cl,
+                    output_dir=OUTPUT_DIR,
+                )
+                st.session_state["cover_letter_docx_path"] = cl_docx
+                st.session_state["cover_letter_export_docx_done"] = True
+            except Exception as e:
+                st.error(f"Export error: {e}")
+
+    if export_cl_pdf_btn:
+        with st.spinner("Generating cover letter PDF…"):
+            try:
+                business_text = build_export_letter(
+                    draft_body=st.session_state["cover_letter_edited_draft"],
+                    candidate_name=source_candidate_name,
+                    hiring_manager_name=hiring_manager_name,
+                    job_title=job_title_cl,
+                    company_name=company_name_cl,
+                )
+                cl_docx = export_cover_letter_docx(
+                    cover_letter_text=business_text,
+                    candidate_name=source_candidate_name,
+                    company_name=company_name_cl,
+                    output_dir=OUTPUT_DIR,
+                )
+                cl_pdf = _convert_to_pdf(cl_docx)
+                st.session_state["cover_letter_docx_path"] = cl_docx
+                st.session_state["cover_letter_pdf_path"] = cl_pdf
+                st.session_state["cover_letter_export_pdf_done"] = True
+            except Exception as e:
+                st.error(f"Export error: {e}")
+
+    if st.session_state.get("cover_letter_export_docx_done"):
+        cl_docx_path: Path | None = st.session_state.get("cover_letter_docx_path")
+        if cl_docx_path and cl_docx_path.exists():
+            with open(cl_docx_path, "rb") as f:
+                st.download_button(
+                    label="Download Cover Letter (.docx)",
+                    data=f.read(),
+                    file_name=cl_docx_path.name,
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+
+    if st.session_state.get("cover_letter_export_pdf_done"):
+        cl_pdf_path: Path | None = st.session_state.get("cover_letter_pdf_path")
+        if cl_pdf_path and cl_pdf_path.exists():
+            with open(cl_pdf_path, "rb") as f:
+                st.download_button(
+                    label="Download Cover Letter (.pdf)",
+                    data=f.read(),
+                    file_name=cl_pdf_path.name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+        else:
+            st.warning("PDF conversion requires LibreOffice. Try exporting to Word instead.")
