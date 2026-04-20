@@ -24,7 +24,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Enter your **OpenAI API key** in the sidebar when prompted.
+Enter your **LLM API key** in the sidebar when prompted.
 
 ## Project structure
 

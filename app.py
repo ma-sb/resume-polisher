@@ -6,7 +6,7 @@ from pathlib import Path
 
 from core.reader import load_resumes, read_resume_from_bytes, Resume
 from core.matcher import PROVIDERS, match_resumes, get_improvements, optimize_resume
-from core.exporter import export, export_docx, _convert_to_pdf
+from core.exporter import export_docx, _convert_to_pdf
 from core.cover_letter import (
     resume_payload_from_source,
     generate_cover_letter,
@@ -29,7 +29,7 @@ STEP_LABELS = [
 
 STEP_TOOLTIPS = {
     1: "Paste the full job posting so the AI knows what to optimize for.",
-    2: "Upload one or more .docx resume versions — the AI will compare them.",
+    2: "Upload one or more resume versions (.docx, .pdf, .doc) — the AI will compare them.",
     3: "The AI scores each resume against the job and picks the best match.",
     4: "Get bullet-by-bullet rewrite suggestions with keywords from the job.",
     5: "Generate a fully optimized resume and preview it before exporting.",
@@ -295,7 +295,7 @@ with st.sidebar:
 
     if not saved_key:
         st.divider()
-        st.markdown("**Save your API key**")
+        st.markdown("**Save your LLM API key**")
         st.markdown(
             "Create a file at\n"
             "`resume_polisher/.streamlit/secrets.toml`\n"
