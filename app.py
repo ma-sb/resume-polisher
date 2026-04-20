@@ -892,11 +892,21 @@ if st.session_state.get("cover_letter_generated"):
             with st.chat_message("user" if msg.get("role") == "user" else "assistant"):
                 st.write(msg.get("content", ""))
 
-        feedback = st.chat_input("How should the draft be improved?")
-        if feedback:
+        feedback = st.text_area(
+            "How should the draft be improved?",
+            key="cover_letter_feedback_input",
+            height=90,
+            placeholder="E.g., make it shorter, emphasize leadership, and reduce generic phrasing.",
+        )
+        send_feedback = st.button(
+            "Apply Feedback",
+            key="cover_letter_apply_feedback_btn",
+            use_container_width=True,
+        )
+        if send_feedback and feedback.strip():
             st.session_state["cover_letter_chat_history"].append({
                 "role": "user",
-                "content": feedback,
+                "content": feedback.strip(),
             })
             with st.spinner("Revising draft with your feedback…"):
                 try:
@@ -904,7 +914,7 @@ if st.session_state.get("cover_letter_generated"):
                         job_description=job_desc,
                         resume_text=source_resume_text,
                         current_draft=st.session_state.get("cover_letter_edited_draft", ""),
-                        feedback=feedback,
+                        feedback=feedback.strip(),
                         api_key=api_key,
                         model=active_model,
                         base_url=base_url,
@@ -929,6 +939,8 @@ if st.session_state.get("cover_letter_generated"):
                     st.rerun()
                 except Exception as e:
                     st.error(f"Error improving draft: {e}")
+        elif send_feedback:
+            st.warning("Enter feedback before applying changes.")
 
     export_ready = bool(st.session_state.get("cover_letter_edited_draft", "").strip() and company_name_cl.strip())
     if not company_name_cl.strip():
